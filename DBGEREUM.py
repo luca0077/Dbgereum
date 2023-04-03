@@ -9,6 +9,11 @@ from tkinter import messagebox
 from pathlib import Path
 from platform import system
 
+import binascii
+
+from ctypes import windll
+windll.shcore.SetProcessDpiAwareness(1) # Owesome!!!! 解决字体模糊
+
 #######################################CURRENT_PATH########################################
 location = str(Path(__file__).absolute().parent) + "/"
 ###########################################################################################
@@ -1261,7 +1266,7 @@ class GUI:
     def printStack(self, text = None):
         text.delete('1.0', END)
         for i in range(0, len(self.Dbgereum.stack)):
-            value = str(self.Dbgereum.stack[i])
+            value = str(self.Dbgereum.stack[len(self.Dbgereum.stack)-1-i])
             length = 64 - len(value)
             for k in range(0, length):
                 value = "0" + value
@@ -1577,7 +1582,7 @@ class Dbgereum:
             return 0
         if len(dat['msg_value']) % 64 != 0:
             return 0
-        if len(dat['msg_data']) % 64 != 0:
+        if len(dat['msg_data']) % 64 != 8:
             return 0
         try:
             int(dat['this_address'], 16)
@@ -1616,6 +1621,7 @@ class Dbgereum:
             try:
                 location = int(self.stack.pop(), 16)
                 self.ip = location
+                print(f"绝对跳转 {hex(self.ip)}")
             except:
                 print("[JUMP] Smth went wrong :( - Popped value from empty stack...")
                 exit()
@@ -1626,13 +1632,14 @@ class Dbgereum:
             condition = 0
             try:
                 location = int(self.stack.pop(), 16)
-                condition = int(self.stack.pop())
+                condition = int(self.stack.pop(), 16) # invalid literal for int() with base 10: 'XXXXXXX'
                 if condition:
                     self.ip = location
+                    print(f"相对跳转 {hex(self.ip)}")
                 else:
                     self.ip += 1
-            except:
-                print("[JUMPI] Smth went wrong :( - Popped value from empty stack...")
+            except Exception as e:
+                print(f"[JUMPI] Smth went wrong :( - Popped value from empty stack...  {str(e)}")
                 exit()
 
         #PUSH
@@ -1935,11 +1942,17 @@ class Dbgereum:
         elif command == 0x16:
             try:
                 op1 = int(self.stack.pop(), 16)
+            except:
+                op1 = 0
+            try:
                 op2 = int(self.stack.pop(), 16)
+            except:
+                op2 = 0
+            try:
                 self.stack.append(hex(op1 & op2)[2:])
                 self.ip += 1
-            except:
-                print("[AND] Smth went wrong :( - Popped value from empty stack...")
+            except Exception as e:
+                print(f"[AND] Smth went wrong :( - Popped value from empty stack...   {str(e)}")
                 exit()
 
         #OR
@@ -2032,11 +2045,14 @@ class Dbgereum:
             try:
                 offset = int(self.stack.pop(), 16)
                 length = int(self.stack.pop(), 16)
-                res = self.bytecode[offset:offset + length]
+                # res = self.bytecode[offset:offset + length]
+                res = self.memory[offset:offset + length]
                 k = keccak.new(digest_bits=256)
+                res = binascii.unhexlify("".join(res))
                 k.update(res)
                 res = k.hexdigest()
-                self.stack.append(hex(res)[2:])
+                # self.stack.append(hex(res)[2:])
+                self.stack.append(res)
                 self.ip += 1
             except:
                 print("[SHA3] Smth went wrong :( - Popped value from empty stack...")
@@ -2090,7 +2106,11 @@ class Dbgereum:
             try:
                 key = int(self.stack.pop(), 16)
                 try:
-                    self.stack.append(self.storage[key])
+                    slot_value = 0
+                    for k in self.storage:
+                        if key == k.split(":")[0]:
+                            slot_value = k.split(":")[1]
+                    self.stack.append(slot_value)
                     self.ip += 1
                 except:
                     print("[SLOAD] key-value query doesn't exist. Implement storage parsing before exec.")
@@ -2293,12 +2313,13 @@ class Dbgereum:
                     exit()
                 i = int(self.stack.pop(), 16)
                 msg_data = ""
-                for k in range(0, 64):
-                    msg_data += self.data['msg_data'][i * 64 + k]
+                # for k in range(0, 64):
+                #     msg_data += self.data['msg_data'][i * 64 + k]
+                msg_data = self.data['msg_data'][i*2 : (i+32) * 2]
                 self.stack.append(msg_data)
                 self.ip += 1
-            except:
-                print("[CALLDATALOAD] Smth went wrong with input :(")
+            except Exception as e:
+                print(f"[CALLDATALOAD] Smth went wrong with input :(   {str(e)}")
                 exit()
             
         #CALLDATASIZE
@@ -2356,13 +2377,13 @@ class Dbgereum:
                 offset = int(self.stack.pop(), 16)
                 length = int(self.stack.pop(), 16)
 
-                for k in range(0, length):
-                    memory[destOffset * 2 + k] = self.bytecode[offset + k]
+                for k in range(length):
+                    self.memory[destOffset * 2 + k] = hex(self.bytecode[offset + k])[2:]
                 
-                self.memory += length
+                self.memory_size += length
                 self.ip += 1
-            except:
-                print("[CODECOPY] Smth went wrong with input :(")
+            except Exception as e:
+                print(f"[CODECOPY] Smth went wrong with input :(  {str(e)}")
                 exit()
 
         #GASPRICE
